@@ -1,6 +1,20 @@
 // src/WishGameWithRooms.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { ChevronRight, Users, Heart, Shuffle, Eye, EyeOff, Download, Plus, Minus, Check, X, Lock, Search, UserPlus, Copy, Home } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import confetti from 'canvas-confetti';
+import {
+  Users,
+  Heart,
+  Shuffle,
+  Plus,
+  Minus,
+  Check,
+  Lock,
+  Search,
+  UserPlus,
+  Copy,
+  Home,
+} from 'lucide-react';
 
 // =====================
 // 类型定义
@@ -10,7 +24,7 @@ interface Player {
   name: string;
   wishes: string[];
   isOwner?: boolean;
-  locked?: boolean; // ✅ 新增：是否锁定愿望
+  locked?: boolean; // 是否锁定愿望
 }
 
 interface Wish {
@@ -42,7 +56,7 @@ interface GameState {
   currentRoom?: Room;
   currentPlayerId?: string;
   showResults: boolean;
-  isViewer?: boolean; // ✅ 新增：是否只读查看
+  isViewer?: boolean; // 只读查看
 }
 
 // =====================
@@ -73,6 +87,7 @@ class MockRoomAPI {
       createdAt: Date.now()
     };
 
+    // 把房主加入房间
     room.players.push({
       id: ownerId,
       name: ownerName || '房主',
@@ -96,21 +111,18 @@ class MockRoomAPI {
     if (!room) return { success: false, error: '房间不存在' };
     if (room.password !== password) return { success: false, error: '密码错误' };
 
-    // ✅ 先判断是否同一玩家“重连”（按 id 或 按名字）
+    // 重连：按 id 或 名字
     const existingById = room.players.find(p => p.id === playerId);
     const sameNamePlayer = room.players.find(p => p.name === playerName);
 
     if (existingById) {
-      // 已经在房间里：允许直接进入
       return { success: true, room, asViewer: false, resolvedPlayerId: existingById.id };
     }
-
     if (sameNamePlayer) {
-      // 用同名视为“重连到原玩家”，不再新占位置
       return { success: true, room, asViewer: false, resolvedPlayerId: sameNamePlayer.id };
     }
 
-    // ✅ 满员时允许只读查看
+    // 满员则只读
     if (room.players.length >= room.maxPlayers) {
       return { success: true, room, asViewer: true };
     }
@@ -188,7 +200,6 @@ function matchWishes(players: Player[], wishes: Wish[], seed: string): MatchPair
     }
     if (!assigned) throw new Error('无法为所有玩家分配愿望，请重试');
   }
-
   return pairs;
 }
 
@@ -219,8 +230,9 @@ export default function WishGameWithRooms() {
   const [joinPassword, setJoinPassword] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(6);
   const mountedRef = useRef(true);
+  const [showMatchFX, setShowMatchFX] = useState(false); // 匹配动画
 
-  // ✅ StrictMode 下双挂载：挂载时设 true，卸载时设 false
+  // StrictMode 双挂载保护
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -232,13 +244,9 @@ export default function WishGameWithRooms() {
       setError('');
     }
   };
-  const setErrorSafe = (errorMessage: string) => {
-    if (mountedRef.current) setError(errorMessage);
-  };
+  const setErrorSafe = (msg: string) => mountedRef.current && setError(msg);
 
-  // =====================
   // 房间管理
-  // =====================
   const createRoom = () => {
     if (!roomPassword || roomPassword.length !== 4) {
       setErrorSafe('密码必须是4位数字或字母');
@@ -248,10 +256,7 @@ export default function WishGameWithRooms() {
     const ownerName = newPlayerName ? sanitizeText(newPlayerName) : '房主';
     const room = roomAPI.createRoom(roomPassword, maxPlayers, playerId, ownerName);
 
-    // ✅ 本地记住身份（同一房间名可重连）
-    try {
-      localStorage.setItem(`wishgame:${room.id}:${ownerName}`, playerId);
-    } catch {}
+    try { localStorage.setItem(`wishgame:${room.id}:${ownerName}`, playerId); } catch {}
 
     updateGameState(prev => ({
       ...prev,
@@ -267,29 +272,20 @@ export default function WishGameWithRooms() {
       setErrorSafe('请填写完整信息');
       return;
     }
-
     const roomId = joinRoomId.toUpperCase();
     const cleanName = sanitizeText(newPlayerName);
 
-    // ✅ 先尝试从本地拿上次进房时的玩家ID
     let playerId = '';
-    try {
-      playerId = localStorage.getItem(`wishgame:${roomId}:${cleanName}`) || '';
-    } catch {}
+    try { playerId = localStorage.getItem(`wishgame:${roomId}:${cleanName}`) || ''; } catch {}
     if (!playerId) playerId = generatePlayerId();
 
     const result = roomAPI.joinRoom(roomId, joinPassword, playerId, cleanName);
 
     if (result.success && result.room) {
       const resolvedId = result.resolvedPlayerId || (result.asViewer ? undefined : playerId);
-
-      // ✅ 成功进入且非只读，保存映射，便于下次同名重连
       if (resolvedId) {
-        try {
-          localStorage.setItem(`wishgame:${result.room.id}:${cleanName}`, resolvedId);
-        } catch {}
+        try { localStorage.setItem(`wishgame:${result.room.id}:${cleanName}`, resolvedId); } catch {}
       }
-
       updateGameState(prev => ({
         ...prev,
         mode: 'IN_ROOM',
@@ -306,12 +302,10 @@ export default function WishGameWithRooms() {
     updateGameState(prev => ({ mode: 'MENU', showResults: false }));
   };
 
-  // =====================
-  // 玩家愿望（仅本人&非只读可改）
-  // =====================
+  // 仅本人&非只读可改
   const updatePlayerWish = (playerId: string, wishIndex: number, text: string) => {
     if (!gameState.currentRoom) return;
-    if (gameState.isViewer || playerId !== gameState.currentPlayerId) return; // ✅ 权限控制
+    if (gameState.isViewer || playerId !== gameState.currentPlayerId) return;
 
     const sanitized = sanitizeText(text);
     const updatedRoom = roomAPI.updateRoom(gameState.currentRoom.id, room => ({
@@ -325,7 +319,7 @@ export default function WishGameWithRooms() {
 
   const addWishToPlayer = (playerId: string) => {
     if (!gameState.currentRoom) return;
-    if (gameState.isViewer || playerId !== gameState.currentPlayerId) return; // ✅ 权限控制
+    if (gameState.isViewer || playerId !== gameState.currentPlayerId) return;
 
     const updatedRoom = roomAPI.updateRoom(gameState.currentRoom.id, room => ({
       ...room,
@@ -338,7 +332,7 @@ export default function WishGameWithRooms() {
 
   const removeWishFromPlayer = (playerId: string, wishIndex: number) => {
     if (!gameState.currentRoom) return;
-    if (gameState.isViewer || playerId !== gameState.currentPlayerId) return; // ✅ 权限控制
+    if (gameState.isViewer || playerId !== gameState.currentPlayerId) return;
 
     const updatedRoom = roomAPI.updateRoom(gameState.currentRoom.id, room => ({
       ...room,
@@ -349,9 +343,7 @@ export default function WishGameWithRooms() {
     if (updatedRoom) updateGameState(prev => ({ ...prev, currentRoom: updatedRoom }));
   };
 
-  // =====================
   // 游戏流程
-  // =====================
   const startGame = () => {
     if (!gameState.currentRoom) return;
     const players = gameState.currentRoom.players;
@@ -361,7 +353,6 @@ export default function WishGameWithRooms() {
       return;
     }
 
-    // ✅ 至少 2 个愿望 且 已锁定
     const everyoneOk = players.every(p => p.wishes.filter(w => w.trim()).length >= 2 && p.locked === true);
     if (!everyoneOk) {
       setErrorSafe('每位玩家至少2个愿望并“锁定”后，房主才能开始');
@@ -386,26 +377,30 @@ export default function WishGameWithRooms() {
     if (updatedRoom) updateGameState(prev => ({ ...prev, currentRoom: updatedRoom }));
   };
 
-  // 匹配阶段异步执行
+  // 匹配动画 + 结果揭晓
   useEffect(() => {
     if (gameState.currentRoom?.stage === 'MATCHING') {
+      setShowMatchFX(true);
       const timer = setTimeout(() => {
         if (!mountedRef.current || !gameState.currentRoom) return;
         try {
           const pairs = matchWishes(gameState.currentRoom.players, gameState.currentRoom.wishes, gameState.currentRoom.seed);
           const updatedRoom = roomAPI.updateRoom(gameState.currentRoom.id, room => ({ ...room, pairs, stage: 'REVEALED' }));
-          if (updatedRoom) updateGameState(prev => ({ ...prev, currentRoom: updatedRoom }));
+          if (updatedRoom) {
+            updateGameState(prev => ({ ...prev, currentRoom: updatedRoom }));
+            try { confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } }); } catch {}
+          }
         } catch (error) {
           setErrorSafe(error instanceof Error ? error.message : '匹配失败');
+        } finally {
+          setShowMatchFX(false);
         }
-      }, 1000);
+      }, 2500); // 动画时长 2.5s
       return () => clearTimeout(timer);
     }
   }, [gameState.currentRoom?.stage]);
 
-  // =====================
-  // UI：主菜单
-  // =====================
+  // 主菜单
   if (gameState.mode === 'MENU') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 flex items-center justify-center p-4">
@@ -428,9 +423,7 @@ export default function WishGameWithRooms() {
     );
   }
 
-  // =====================
-  // UI：创建房间
-  // =====================
+  // 创建房间
   if (gameState.mode === 'CREATE_ROOM') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 flex items-center justify-center p-4">
@@ -467,9 +460,7 @@ export default function WishGameWithRooms() {
     );
   }
 
-  // =====================
-  // UI：加入房间
-  // =====================
+  // 加入房间
   if (gameState.mode === 'JOIN_ROOM') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 flex items-center justify-center p-4">
@@ -504,21 +495,17 @@ export default function WishGameWithRooms() {
     );
   }
 
-  // =====================
-  // UI：房间内
-  // =====================
+  // 房间内
   if (gameState.mode === 'IN_ROOM' && gameState.currentRoom) {
     const room = gameState.currentRoom;
-
-    // ✅ 支持只读查看者
     const isViewer = !!gameState.isViewer;
     const currentPlayer = isViewer ? undefined : room.players.find(p => p.id === gameState.currentPlayerId);
     const isOwner = !!currentPlayer?.isOwner;
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4">
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4 relative">
         <div className="max-w-2xl mx-auto">
-          <div className="bg-white rounded-2xl shadow-xl p-6">
+          <div className="bg-white rounded-2xl shadow-xl p-6 relative">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-2xl font-bold text-gray-800">房间：{room.id}</h2>
@@ -537,7 +524,6 @@ export default function WishGameWithRooms() {
               </div>
             </div>
 
-            {/* ✅ 只读查看提示 */}
             {isViewer && (
               <div className="mb-4 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 text-sm">
                 只读查看模式（房间已满或以查看者身份进入），你不能编辑或参与匹配。
@@ -572,7 +558,6 @@ export default function WishGameWithRooms() {
                       )}
                     </div>
 
-                    {/* ✅ 仅本人且非只读可编辑 */}
                     {editingPlayer === player.id && isCurrentPlayer && !isViewer && (
                       <div className="space-y-3">
                         {player.wishes.map((wish, wishIndex) => (
@@ -592,7 +577,7 @@ export default function WishGameWithRooms() {
                           </button>
                         )}
 
-                        {/* ✅ 锁定 / 解锁按钮（仅本人） */}
+                        {/* 锁定按钮 */}
                         {isCurrentPlayer && !isViewer && (
                           <div className="mt-3 flex items-center gap-2">
                             <button
@@ -612,7 +597,6 @@ export default function WishGameWithRooms() {
                       </div>
                     )}
 
-                    {/* 非编辑态下的状态行 */}
                     {editingPlayer !== player.id && (
                       <div className="text-sm text-gray-600">
                         已添加 {wishCount} 个愿望
@@ -624,16 +608,7 @@ export default function WishGameWithRooms() {
               })}
             </div>
 
-            {room.players.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <Users className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                <p>房间已创建！分享房间号给朋友们加入吧</p>
-                <p className="text-sm mt-2">房间号：<span className="font-mono font-bold">{room.id}</span></p>
-                <p className="text-sm">密码：<span className="font-mono font-bold">{room.password}</span></p>
-              </div>
-            )}
-
-            {/* ✅ 房主且非只读，且满足人数，显示开始按钮 */}
+            {/* 房主开始按钮 */}
             {isOwner && !isViewer && room.players.length >= 3 && (
               <div className="mt-6 pt-6 border-t">
                 <button onClick={startGame} className="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-green-600 hover:to-blue-600 transition-all flex items-center justify-center gap-2">
@@ -642,11 +617,7 @@ export default function WishGameWithRooms() {
               </div>
             )}
 
-            {!isOwner && room.players.length < 3 && (
-              <div className="mt-6 pt-6 border-t text-center text-gray-600">等待更多玩家加入...</div>
-            )}
-
-            {/* 简化其余阶段演示 */}
+            {/* 阶段提示/操作 */}
             {room.stage === 'LOCK_CONFIRM' && (
               <div className="mt-6 pt-6 border-t">
                 {isOwner && !isViewer ? (
@@ -664,9 +635,11 @@ export default function WishGameWithRooms() {
                 )}
               </div>
             )}
+
             {room.stage === 'MATCHING' && (
               <div className="mt-6 pt-6 border-t text-center text-gray-700">正在匹配中…</div>
             )}
+
             {room.stage === 'REVEALED' && (
               <div className="mt-6 pt-6 border-t">
                 <h3 className="text-lg font-semibold mb-4 text-gray-800">匹配结果</h3>
@@ -695,6 +668,11 @@ export default function WishGameWithRooms() {
                 </div>
               </div>
             )}
+
+            {/* 匹配动画遮罩 */}
+            <AnimatePresence>
+              {showMatchFX && <MatchingOverlay wishes={room.wishes} />}
+            </AnimatePresence>
           </div>
         </div>
       </div>
@@ -704,17 +682,83 @@ export default function WishGameWithRooms() {
   return null;
 }
 
+// =====================
+// 动画层组件
+// =====================
+function MatchingOverlay({ wishes }: { wishes: Wish[] }) {
+  const samples = wishes.length
+    ? wishes.map(w => w.text).slice(0, 20)
+    : ['愿望收集中', '正在洗牌', '准备抽签'];
 
-// =====================
-// （可选）示例 main.tsx 参考
-// 将下列内容放入 src/main.tsx 并确保引入 ./index.css
-// =====================
-// import React from 'react'
-// import ReactDOM from 'react-dom/client'
-// import './index.css'
-// import WishGameWithRooms from './WishGameWithRooms'
-// ReactDOM.createRoot(document.getElementById('root')!).render(
-//   <React.StrictMode>
-//     <WishGameWithRooms />
-//   </React.StrictMode>
-// )
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 backdrop-blur-sm bg-white/60 flex items-center justify-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <div className="relative w-full max-w-xl mx-auto">
+        {/* 心形脉冲 */}
+        <motion.div
+          className="mx-auto w-20 h-20 rounded-full flex items-center justify-center"
+          initial={{ scale: 0.8, opacity: 0.7 }}
+          animate={{ scale: [0.8, 1.05, 0.8], opacity: [0.7, 1, 0.7] }}
+          transition={{ duration: 1.2, repeat: Infinity }}
+        >
+          <Heart className="w-12 h-12 text-pink-500" />
+        </motion.div>
+
+        {/* 文案 */}
+        <div className="mt-6 h-10 overflow-hidden">
+          <motion.div
+            key="matching-text"
+            initial={{ y: 30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -30, opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="text-center text-gray-700"
+          >
+            正在随机分配愿望…
+          </motion.div>
+        </div>
+
+        {/* 漂浮卡片 */}
+        <div className="pointer-events-none">
+          {[...Array(16)].map((_, i) => (
+            <FloatCard key={i} index={i} samples={samples} />
+          ))}
+        </div>
+
+        {/* 进度条 */}
+        <div className="mt-8 h-2 w-64 mx-auto bg-gray-200 rounded-full overflow-hidden">
+          <motion.div
+            className="h-full bg-gradient-to-r from-purple-500 to-pink-500"
+            initial={{ width: '0%' }}
+            animate={{ width: '100%' }}
+            transition={{ duration: 2.2, ease: 'easeInOut' }}
+          />
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function FloatCard({ index, samples }: { index: number; samples: string[] }) {
+  const text = samples[(index * 7) % samples.length] || '愿望';
+  const delay = (index % 8) * 0.15;
+  const startX = (index * 37) % 100;
+
+  return (
+    <motion.div
+      className="absolute"
+      style={{ left: `${startX}%`, top: `${(index * 53) % 90}%` }}
+      initial={{ y: 20, opacity: 0, rotate: -6 }}
+      animate={{ y: [20, -20, 20], opacity: [0, 1, 0.6, 1], rotate: [-6, 6, -6] }}
+      transition={{ duration: 2.4, delay, repeat: Infinity, ease: 'easeInOut' }}
+    >
+      <div className="px-3 py-1 rounded-xl shadow bg-white/90 border text-gray-700 text-xs max-w-[240px] truncate">
+        {text}
+      </div>
+    </motion.div>
+  );
+}
