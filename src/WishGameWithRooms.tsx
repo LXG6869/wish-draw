@@ -25,7 +25,7 @@ interface Player {
   wishes: string[];
   isOwner?: boolean;
   locked?: boolean; // 是否锁定愿望
-  group?: string;   // ✅ 新增：分组（'A' | 'B' | 'C' | 'D'）
+  group?: string;   // 分组（'A' | 'B' | 'C' | 'D'）
 }
 
 interface Wish {
@@ -88,14 +88,14 @@ class MockRoomAPI {
       createdAt: Date.now()
     };
 
-    // 把房主加入房间（默认 A 组）
+    // 房主加入房间（默认 A 组）
     room.players.push({
       id: ownerId,
       name: ownerName || '房主',
       wishes: ['', ''],
       isOwner: true,
       locked: false,
-      group: 'A', // ✅ 房主默认 A 组
+      group: 'A',
     });
 
     this.rooms.set(room.id, room);
@@ -129,7 +129,7 @@ class MockRoomAPI {
       return { success: true, room, asViewer: true };
     }
 
-    // ✅ 新增玩家：按“当前最少人数的组”自动分配（A-D）
+    // 新增玩家：按“当前最少人数的组”自动分配
     const groups = ['A', 'B', 'C', 'D'];
     const counts = groups.map(g => room.players.filter(p => p.group === g).length);
     const group = groups[counts.indexOf(Math.min(...counts))];
@@ -140,7 +140,7 @@ class MockRoomAPI {
       wishes: ['', ''],
       isOwner: false,
       locked: false,
-      group, // ✅ 自动分配的组
+      group,
     });
 
     return { success: true, room, asViewer: false, resolvedPlayerId: playerId };
@@ -162,7 +162,7 @@ class MockRoomAPI {
 const roomAPI = new MockRoomAPI();
 
 // =====================
-// 随机数 & 匹配算法（跨组约束）
+// 随机数 & 匹配算法（跨组 + 随机化匹配）
 // =====================
 class SeededRandom {
   private seed: number;
@@ -190,36 +190,123 @@ class SeededRandom {
 }
 
 function matchWishes(players: Player[], wishes: Wish[], seed: string): MatchPair[] {
-  const rng = new SeededRandom(seed);
-  const shuffledWishes = rng.shuffle(wishes);
-  const pairs: MatchPair[] = [];
-  const usedWishes = new Set<string>();
-  const groupOf = new Map(players.map(p => [p.id, p.group || 'A']));
+  // 尝试多次，不同 attemptSeed 上重新洗牌候选与玩家顺序，避免固定模式
+  for (let attempt = 0; attempt < 7; attempt++) {
+    const attemptSeed = seed + '|' + attempt;
 
-  for (const player of players) {
-    const myGroup = groupOf.get(player.id) || 'A';
-    let assigned = false;
+    // 映射：玩家所在组
+    const groupOf = new Map(players.map(p => [p.id, p.group || 'A']));
 
-    for (const wish of shuffledWishes) {
-      const ownerGroup = groupOf.get(wish.ownerId) || 'A';
-      if (
-        !usedWishes.has(wish.id) &&
-        wish.ownerId !== player.id &&       // 不能抽到自己
-        ownerGroup !== myGroup              // ✅ 不能抽到同组
-      ) {
-        pairs.push({ pickerId: player.id, wishId: wish.id });
-        usedWishes.add(wish.id);
-        assigned = true;
-        break;
+    // 为每个玩家生成候选愿望并独立打乱（使用 attemptSeed）
+    const wishById = new Map(wishes.map(w => [w.id, w]));
+    const allWishIds = wishes.map(w => w.id);
+    const candidates = new Map<string, string[]>();
+    for (const p of players) {
+      const myGroup = groupOf.get(p.id) || 'A';
+      const list = allWishIds.filter(id => {
+        const w = wishById.get(id)!;
+        const ownerGroup = groupOf.get(w.ownerId) || 'A';
+        return w.ownerId !== p.id && ownerGroup !== myGroup; // 非自己 & 跨组
+      });
+      if (list.length === 0) {
+        throw new Error(`玩家「${p.name}」在当前分组下没有可选愿望，请调整分组或增添参与者/愿望`);
       }
+      const shuffled = new SeededRandom(attemptSeed + '#cand#' + p.id).shuffle(list);
+      candidates.set(p.id, shuffled);
     }
 
-    if (!assigned) {
-      throw new Error('当前分组下无法为所有玩家分配跨组愿望，请调整分组或增加参与者再试');
+    // 随机化玩家尝试顺序（使用 attemptSeed）
+    const playerOrder = new SeededRandom(attemptSeed + '#order').shuffle(players.map(p => p.id));
+
+    // 二分图匹配（DFS 增广）
+    const wishAssignedTo = new Map<string, string>();
+    const pickerAssignedWish = new Map<string, string>();
+
+    function tryMatch(pickerId: string, seen: Set<string>): boolean {
+      const opts = candidates.get(pickerId)!;
+      for (const wid of opts) {
+        if (seen.has(wid)) continue;
+        seen.add(wid);
+        const cur = wishAssignedTo.get(wid);
+        if (!cur || tryMatch(cur, seen)) {
+          wishAssignedTo.set(wid, pickerId);
+          pickerAssignedWish.set(pickerId, wid);
+          return true;
+        }
+      }
+      return false;
     }
+
+    let okAll = true;
+    for (const pid of playerOrder) {
+      if (!tryMatch(pid, new Set())) { okAll = false; break; }
+    }
+    if (okAll) {
+      const pairs: MatchPair[] = [];
+      for (const [pickerId, wishId] of pickerAssignedWish.entries()) {
+        pairs.push({ pickerId, wishId });
+      }
+      return pairs;
+    }
+    // 否则换 attemptSeed 再来一轮
   }
 
-  return pairs;
+  throw new Error('当前分组/愿望组合下无法为所有玩家分配跨组愿望，请调整分组或愿望数量后重试');
+}
+
+// =====================
+// （开发环境）快速自测用例
+// =====================
+function __selfTest() {
+  try {
+    const A: Player = { id: 'A', name: 'Alice', wishes: ['A1', 'A2'], group: 'A' };
+    const B: Player = { id: 'B', name: 'Bob',   wishes: ['B1', 'B2'], group: 'B' };
+    const players = [A, B];
+    const wishes: Wish[] = [
+      { id: 'wA1', ownerId: 'A', text: 'A1' },
+      { id: 'wA2', ownerId: 'A', text: 'A2' },
+      { id: 'wB1', ownerId: 'B', text: 'B1' },
+      { id: 'wB2', ownerId: 'B', text: 'B2' },
+    ];
+
+    const p1 = matchWishes(players, wishes, 'seed-1');
+    const p2 = matchWishes(players, wishes, 'seed-2');
+
+    const ok1 = p1.length === 2 && p1.every(pr => wishes.find(w => w.id === pr.wishId && w.ownerId !== pr.pickerId));
+    const ok2 = p2.length === 2 && p2.every(pr => wishes.find(w => w.id === pr.wishId && w.ownerId !== pr.pickerId));
+    console.assert(ok1, '[TEST] 用例1失败：基础跨组匹配不成立');
+    console.assert(ok2, '[TEST] 用例2失败：不同 seed 仍应有效');
+
+    // 同组无解示例
+    const C: Player = { id: 'C', name: 'Cara', wishes: ['C1', 'C2'], group: 'A' };
+    try {
+      matchWishes([A, C], wishes, 'seed-3');
+      console.warn('[TEST] 用例3期望抛错（同组无解），但未抛错');
+    } catch {}
+
+    // 多人多组约束校验
+    const D: Player = { id: 'D', name: 'Dan', wishes: ['D1', 'D2'], group: 'B' };
+    const players2 = [A, B, C, D];
+    const wishes2: Wish[] = [
+      { id: 'wA1', ownerId: 'A', text: 'A1' }, { id: 'wA2', ownerId: 'A', text: 'A2' },
+      { id: 'wB1', ownerId: 'B', text: 'B1' }, { id: 'wB2', ownerId: 'B', text: 'B2' },
+      { id: 'wC1', ownerId: 'C', text: 'C1' }, { id: 'wC2', ownerId: 'C', text: 'C2' },
+      { id: 'wD1', ownerId: 'D', text: 'D1' }, { id: 'wD2', ownerId: 'D', text: 'D2' },
+    ];
+    const p3 = matchWishes(players2, wishes2, 'seed-4');
+    const ok3 = p3.length === 4 && p3.every(pr => {
+      const w = wishes2.find(x => x.id === pr.wishId)!;
+      return w.ownerId !== pr.pickerId && (players2.find(pp => pp.id === pr.pickerId)?.group !== players2.find(pp => pp.id === w.ownerId)?.group);
+    });
+    console.assert(ok3, '[TEST] 用例4失败：多人跨组约束不成立');
+
+    // console.log('[TEST] 自测已运行');
+  } catch (e) {
+    console.warn('[TEST] 自测异常：', e);
+  }
+}
+if ((import.meta as any)?.env?.DEV) {
+  try { __selfTest(); } catch {}
 }
 
 // =====================
@@ -367,13 +454,13 @@ export default function WishGameWithRooms() {
     if (!gameState.currentRoom) return;
     const players = gameState.currentRoom.players;
 
-    // ✅ 至少 2 人
+    // 至少 2 人
     if (players.length < 2) {
       setErrorSafe('至少需要2位玩家');
       return;
     }
 
-    // ✅ 可选：至少存在两个分组，否则一定无法跨组匹配
+    // 至少存在两个分组，否则无法跨组匹配
     const groups = new Set(players.map(p => p.group || 'A'));
     if (groups.size < 2) {
       setErrorSafe('当前所有玩家都在同一组，无法进行跨组抽签，请调整分组');
@@ -400,7 +487,10 @@ export default function WishGameWithRooms() {
       });
     });
 
-    const updatedRoom = roomAPI.updateRoom(gameState.currentRoom.id, room => ({ ...room, wishes, stage: 'MATCHING' }));
+    const updatedRoom = roomAPI.updateRoom(gameState.currentRoom.id, room => {
+      const newSeed = `${room.seed}|${Date.now()}|${Math.random().toString(36).slice(2)}`;
+      return { ...room, wishes, seed: newSeed, stage: 'MATCHING' };
+    });
     if (updatedRoom) updateGameState(prev => ({ ...prev, currentRoom: updatedRoom }));
   };
 
@@ -471,7 +561,7 @@ export default function WishGameWithRooms() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">最大人数</label>
-              <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+              <select value={maxPlayers} onChange={(e) => setMaxPlayers(Number(e.target.value))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus;border-transparent">
                 {[2,3,4,5,6,7,8,9,10].map(num => (<option key={num} value={num}>{num} 人</option>))}
               </select>
             </div>
@@ -503,7 +593,7 @@ export default function WishGameWithRooms() {
               <input type="text" value={joinRoomId} onChange={(e) => setJoinRoomId(e.target.value.toUpperCase())} placeholder="输入房间号" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-center text-lg font-mono" maxLength={6} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">房间密码</label>
+              <label className="block text.sm font-medium text-gray-700 mb-2">房间密码</label>
               <input type="text" value={joinPassword} onChange={(e) => setJoinPassword(e.target.value.slice(0, 4))} placeholder="输入密码" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-center text-lg font-mono" maxLength={4} />
             </div>
             <div>
@@ -573,7 +663,6 @@ export default function WishGameWithRooms() {
                           {player.name}
                           {player.isOwner && <span className="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">房主</span>}
                           {isCurrentPlayer && !isViewer && <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">你</span>}
-                          {/* ✅ 组徽标 */}
                           <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{player.group || 'A'} 组</span>
                         </h3>
                         <span className="text-sm text-gray-500">({wishCount}/4 个愿望)</span>
@@ -606,7 +695,7 @@ export default function WishGameWithRooms() {
                           </button>
                         )}
 
-                        {/* ✅ 选择分组（仅本人可改） */}
+                        {/* 分组选择（仅本人） */}
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600">我的分组：</span>
                           <select
@@ -663,7 +752,6 @@ export default function WishGameWithRooms() {
               })}
             </div>
 
-            {/* 房主开始按钮 */}
             {isOwner && !isViewer && room.players.length >= 2 && (
               <div className="mt-6 pt-6 border-t">
                 <button onClick={startGame} className="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-green-600 hover:to-blue-600 transition-all flex items-center justify-center gap-2">
@@ -672,7 +760,6 @@ export default function WishGameWithRooms() {
               </div>
             )}
 
-            {/* 阶段提示/操作 */}
             {room.stage === 'LOCK_CONFIRM' && (
               <div className="mt-6 pt-6 border-t">
                 {isOwner && !isViewer ? (
