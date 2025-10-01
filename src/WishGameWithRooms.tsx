@@ -79,6 +79,18 @@ export default function WishGameWithRooms(){
     subRef.current?.unsubscribe(); const ch=supabase.channel(`room-${roomId}`).on('postgres_changes',{event:'*',schema:'public',table:TABLE,filter:`id=eq.${roomId}`},async()=>{const latest=await loadRoom(roomId); if(latest) setStateSafe(p=>({...p,currentRoom:latest}))}).subscribe(); subRef.current=ch; return ()=>{ch.unsubscribe()}
   },[state.currentRoom?.id]);
 
+  // 复制提示
+  const [copySuccess, setCopySuccess] = useState(false);
+  const handleCopyRoom = (roomId: string, passcode: string) => {
+    const text = `${roomId}`;
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }).catch(() => {
+      setErrorSafe('复制失败，请手动复制');
+    });
+  };
+
   // 房间操作
   const createRoom=async()=>{ 
     if(roomPassword.length!==4) return setErrorSafe('密码必须 4 位'); 
@@ -165,10 +177,18 @@ export default function WishGameWithRooms(){
           <div className="bg-white rounded-2xl shadow-xl p-6 relative">
             <div className="flex items-center justify-between mb-6">
               <div><h2 className="text-2xl font-bold text-gray-800">房间:{room.id}</h2><p className="text-gray-600">密码:{room.passcode} | {room.players.length}/{room.maxPlayers} 人</p></div>
-              <div className="flex items-center gap-2"><button onClick={()=>{navigator.clipboard?.writeText(`房间号:${room.id}\n密码:${room.passcode}`)}} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1"><Copy className="w-4 h-4"/> 分享</button><button onClick={()=>setState({mode:'MENU'})} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1"><Home className="w-4 h-4"/> 离开</button></div>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>handleCopyRoom(room.id, room.passcode)} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1">
+                  <Copy className="w-4 h-4"/> {copySuccess ? '已复制!' : '分享'}
+                </button>
+                <button onClick={()=>setState({mode:'MENU'})} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
+                  <Home className="w-4 h-4"/> 离开
+                </button>
+              </div>
             </div>
             {!supabase && <div className="mb-4 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 text-sm">本地内存模式(未配置 Supabase),仅本设备有效。</div>}
             {isViewer && <div className="mb-4 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 text-sm">只读模式。</div>}
+            {copySuccess && <div className="mb-4 rounded-lg bg-green-50 border border-green-200 text-green-800 px-3 py-2 text-sm">✓ 房间信息已复制到剪贴板</div>}
             {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">{error}</div>}
 
             <div className="space-y-4">
@@ -235,10 +255,10 @@ export default function WishGameWithRooms(){
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg p-4 md:hidden z-10">
           <div className="max-w-2xl mx-auto flex justify-between items-center gap-3">
             <button 
-              onClick={()=>{navigator.clipboard?.writeText(`房间号:${room.id}\n密码:${room.passcode}`)}} 
+              onClick={()=>handleCopyRoom(room.id, room.passcode)} 
               className="flex-1 px-4 py-3 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center justify-center gap-2 font-medium"
             >
-              <Copy className="w-5 h-5"/> 分享房间
+              <Copy className="w-5 h-5"/> {copySuccess ? '已复制!' : '分享房间'}
             </button>
             <button 
               onClick={()=>setState({mode:'MENU'})} 
