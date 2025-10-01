@@ -83,12 +83,45 @@ export default function WishGameWithRooms(){
   const [copySuccess, setCopySuccess] = useState(false);
   const handleCopyRoom = (roomId: string, passcode: string) => {
     const text = `${roomId}`;
-    navigator.clipboard?.writeText(text).then(() => {
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 2000);
-    }).catch(() => {
+    
+    // 方法1: 现代 Clipboard API
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      }).catch(() => {
+        // 失败时使用备用方法
+        fallbackCopy(text);
+      });
+    } else {
+      // 方法2: 传统方法（兼容性更好）
+      fallbackCopy(text);
+    }
+  };
+
+  const fallbackCopy = (text: string) => {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } else {
+        setErrorSafe('复制失败，请手动复制');
+      }
+    } catch (err) {
       setErrorSafe('复制失败，请手动复制');
-    });
+    }
+    
+    document.body.removeChild(textArea);
   };
 
   // 房间操作
