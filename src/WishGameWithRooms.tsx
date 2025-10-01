@@ -67,7 +67,7 @@ function matchWishes(players: Player[], wishes: Wish[], seed: string): MatchPair
 // ========== 组件 ==========
 export default function WishGameWithRooms(){
   const [state,setState]=useState<GameState>({mode:'MENU'}); const [error,setError]=useState('');
-  const [roomPassword,setRoomPassword]=useState(''); const [maxPlayers,setMaxPlayers]=useState(6); const [newPlayerName,setNewPlayerName]=useState('');
+  const [roomPassword,setRoomPassword]=useState(''); const [maxPlayers,setMaxPlayers]=useState(2); const [newPlayerName,setNewPlayerName]=useState('');
   const [joinRoomId,setJoinRoomId]=useState(''); const [joinPassword,setJoinPassword]=useState(''); const [spinning,setSpinning]=useState(false);
   const subRef=useRef<RealtimeChannel|null>(null); const mounted=useRef(true);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;subRef.current?.unsubscribe()}},[]); const setErrorSafe=(m:string)=>mounted.current&&setError(m); const setStateSafe=(u:(p:GameState)=>GameState)=>{if(mounted.current){setState(u);setError('')}}
@@ -80,7 +80,16 @@ export default function WishGameWithRooms(){
   },[state.currentRoom?.id]);
 
   // 房间操作
-  const createRoom=async()=>{ if(roomPassword.length!==4) return setErrorSafe('密码必须 4 位'); const pid=newPlayerId(); const name=newPlayerName?clean(newPlayerName):'房主'; const room:Room={ id:newRoomId(), passcode:roomPassword, ownerId:pid, maxPlayers, players:[{id:pid,name,wishes:['',''],isOwner:true,locked:false,group:'A'}], stage:'WAITING', wishes:[], pairs:[], seed:newSeed(), createdAt:Date.now() }; await saveRoom(room); try{localStorage.setItem(`wishgame:${room.id}:${name}`,pid)}catch{} setStateSafe(p=>({...p,mode:'IN_ROOM',currentRoom:room,currentPlayerId:pid,isViewer:false})) };
+  const createRoom=async()=>{ 
+    if(roomPassword.length!==4) return setErrorSafe('密码必须 4 位'); 
+    if(!newPlayerName.trim()) return setErrorSafe('请输入你的昵称');
+    const pid=newPlayerId(); 
+    const name=clean(newPlayerName); 
+    const room:Room={ id:newRoomId(), passcode:roomPassword, ownerId:pid, maxPlayers, players:[{id:pid,name,wishes:['',''],isOwner:true,locked:false,group:'A'}], stage:'WAITING', wishes:[], pairs:[], seed:newSeed(), createdAt:Date.now() }; 
+    await saveRoom(room); 
+    try{localStorage.setItem(`wishgame:${room.id}:${name}`,pid)}catch{} 
+    setStateSafe(p=>({...p,mode:'IN_ROOM',currentRoom:room,currentPlayerId:pid,isViewer:false})) 
+  };
   const joinRoom=async()=>{ if(!joinRoomId||!joinPassword||!newPlayerName) return setErrorSafe('请填写完整信息'); const id=joinRoomId.toUpperCase(); const room=await loadRoom(id); if(!room) return setErrorSafe('房间不存在'); if(room.passcode!==joinPassword) return setErrorSafe('密码错误'); const nick=clean(newPlayerName); let pid=''; try{pid=localStorage.getItem(`wishgame:${id}:${nick}`)||''}catch{} if(!pid) pid=newPlayerId(); const byId=room.players.find(p=>p.id===pid); const same=room.players.find(p=>p.name===nick);
     if(!byId && !same){ if(room.players.length>=room.maxPlayers){ setStateSafe(p=>({...p,mode:'IN_ROOM',currentRoom:room,currentPlayerId:undefined,isViewer:true})); return } const groups=['A','B','C','D']; const cnt=groups.map(g=>room.players.filter(p=>p.group===g).length); const g=groups[cnt.indexOf(Math.min(...cnt))]; const upd:Room={...room,players:[...room.players,{id:pid,name:nick,wishes:['',''],isOwner:false,locked:false,group:g}]}; await saveRoom(upd); try{localStorage.setItem(`wishgame:${id}:${nick}`,pid)}catch{} setStateSafe(p=>({...p,mode:'IN_ROOM',currentRoom:upd,currentPlayerId:pid,isViewer:false})) }
     else { const resolved=byId?.id||same?.id; if(resolved) try{localStorage.setItem(`wishgame:${id}:${nick}`,resolved)}catch{} setStateSafe(p=>({...p,mode:'IN_ROOM',currentRoom:room,currentPlayerId:resolved,isViewer:false})) }
@@ -122,10 +131,10 @@ export default function WishGameWithRooms(){
         {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">{error}</div>}
         <div className="space-y-4">
           <div><label className="block text-sm font-medium text-gray-700 mb-2">房间密码(4位)</label><input value={roomPassword} onChange={e=>setRoomPassword(e.target.value.slice(0,4))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-center text-lg font-mono" maxLength={4}/></div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-2">你的昵称(房主)</label><input value={newPlayerName} onChange={e=>setNewPlayerName(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" maxLength={20}/></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-2">你的昵称(房主) <span className="text-red-500">*</span></label><input value={newPlayerName} onChange={e=>setNewPlayerName(e.target.value)} placeholder="请输入昵称" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" maxLength={20}/></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-2">最大人数</label><select value={maxPlayers} onChange={e=>setMaxPlayers(Number(e.target.value))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">{[2,3,4,5,6,7,8,9,10].map(n=><option key={n} value={n}>{n} 人</option>)}</select></div>
         </div>
-        <div className="mt-8 flex gap-3"><button onClick={()=>setState(p=>({...p,mode:'MENU'}))} className="px-6 py-3 text-gray-600 hover:text-gray-800">返回</button><button onClick={createRoom} disabled={roomPassword.length!==4} className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed"><Lock className="w-4 h-4"/> 创建房间</button></div>
+        <div className="mt-8 flex gap-3"><button onClick={()=>setState(p=>({...p,mode:'MENU'}))} className="px-6 py-3 text-gray-600 hover:text-gray-800">返回</button><button onClick={createRoom} disabled={roomPassword.length!==4 || !newPlayerName.trim()} className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"><Lock className="w-4 h-4"/> 创建房间</button></div>
       </div>
     </div>
   );
@@ -142,7 +151,7 @@ export default function WishGameWithRooms(){
           <div><label className="block text-sm font-medium text-gray-700 mb-2">房间密码</label><input value={joinPassword} onChange={e=>setJoinPassword(e.target.value.slice(0,4))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-center text-lg font-mono" maxLength={4}/></div>
           <div><label className="block text-sm font-medium text-gray-700 mb-2">你的姓名</label><input value={newPlayerName} onChange={e=>setNewPlayerName(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" maxLength={20}/></div>
         </div>
-        <div className="mt-8 flex gap-3"><button onClick={()=>setState(p=>({...p,mode:'MENU'}))} className="px-6 py-3 text-gray-600 hover:text-gray-800">返回</button><button onClick={joinRoom} disabled={!joinRoomId||!joinPassword||!newPlayerName} className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-blue-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed"><UserPlus className="w-4 h-4"/> 加入房间</button></div>
+        <div className="mt-8 flex gap-3"><button onClick={()=>setState(p=>({...p,mode:'MENU'}))} className="px-6 py-3 text-gray-600 hover:text-gray-800">返回</button><button onClick={joinRoom} disabled={!joinRoomId||!joinPassword||!newPlayerName} className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-blue-600 hover:to-purple-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"><UserPlus className="w-4 h-4"/> 加入房间</button></div>
       </div>
     </div>
   );
@@ -151,12 +160,12 @@ export default function WishGameWithRooms(){
   if(state.mode==='IN_ROOM' && state.currentRoom){
     const room=state.currentRoom; const isViewer=!!state.isViewer; const me=isViewer?undefined:room.players.find(p=>p.id===state.currentPlayerId); const isOwner=!!me?.isOwner;
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4 relative">
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 p-4 pb-24">
         <div className="max-w-2xl mx-auto">
           <div className="bg-white rounded-2xl shadow-xl p-6 relative">
             <div className="flex items-center justify-between mb-6">
               <div><h2 className="text-2xl font-bold text-gray-800">房间:{room.id}</h2><p className="text-gray-600">密码:{room.passcode} | {room.players.length}/{room.maxPlayers} 人</p></div>
-              <div className="flex items-center gap-2"><button onClick={()=>{navigator.clipboard?.writeText(`房间号:${room.id}\n密码:${room.passcode}`)}} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200"><Copy className="w-4 h-4"/> 分享</button><button onClick={()=>setState({mode:'MENU'})} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200"><Home className="w-4 h-4"/> 离开</button></div>
+              <div className="flex items-center gap-2"><button onClick={()=>{navigator.clipboard?.writeText(`房间号:${room.id}\n密码:${room.passcode}`)}} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1"><Copy className="w-4 h-4"/> 分享</button><button onClick={()=>setState({mode:'MENU'})} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1"><Home className="w-4 h-4"/> 离开</button></div>
             </div>
             {!supabase && <div className="mb-4 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 text-sm">本地内存模式(未配置 Supabase),仅本设备有效。</div>}
             {isViewer && <div className="mb-4 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800 px-3 py-2 text-sm">只读模式。</div>}
@@ -191,7 +200,7 @@ export default function WishGameWithRooms(){
               )})}
             </div>
 
-            {isOwner && !isViewer && room.players.length>=2 && (
+            {isOwner && !isViewer && room.players.length>=2 && room.stage==='WAITING' && (
               <div className="mt-6 pt-6 border-t"><button onClick={startGame} className="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-green-600 hover:to-blue-600 flex items-center justify-center gap-2"><Check className="w-4 h-4"/> 开始游戏</button></div>
             )}
 
@@ -221,6 +230,53 @@ export default function WishGameWithRooms(){
             <AnimatePresence>{spinning && <ChristmasNineGridOverlay/>}</AnimatePresence>
           </div>
         </div>
+
+        {/* 固定在底部的导航栏 - 移动端优化 */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg p-4 md:hidden z-10">
+          <div className="max-w-2xl mx-auto flex justify-between items-center gap-3">
+            <button 
+              onClick={()=>{navigator.clipboard?.writeText(`房间号:${room.id}\n密码:${room.passcode}`)}} 
+              className="flex-1 px-4 py-3 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center justify-center gap-2 font-medium"
+            >
+              <Copy className="w-5 h-5"/> 分享房间
+            </button>
+            <button 
+              onClick={()=>setState({mode:'MENU'})} 
+              className="flex-1 px-4 py-3 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center justify-center gap-2 font-medium"
+            >
+              <Home className="w-5 h-5"/> 离开房间
+            </button>
+          </div>
+        </div>
+
+        {/* 开始游戏按钮 - 移动端固定在底部 */}
+        {isOwner && !isViewer && room.players.length>=2 && room.stage==='WAITING' && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-green-200 shadow-lg p-4 md:hidden z-20">
+            <div className="max-w-2xl mx-auto">
+              <button 
+                onClick={startGame} 
+                className="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white py-4 px-6 rounded-xl font-bold text-lg hover:from-green-600 hover:to-blue-600 flex items-center justify-center gap-2 shadow-lg"
+              >
+                <Check className="w-6 h-6"/> 开始游戏
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 确认匹配按钮 - 移动端固定在底部 */}
+        {room.stage==='LOCK_CONFIRM' && isOwner && !isViewer && (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-purple-200 shadow-lg p-4 md:hidden z-20">
+            <div className="max-w-2xl mx-auto">
+              <div className="text-center mb-3 text-gray-700 font-medium">所有玩家已锁定,是否现在进行匹配?</div>
+              <button 
+                onClick={confirmAndMatch} 
+                className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-4 px-6 rounded-xl font-bold text-lg hover:from-purple-600 hover:to-pink-600 flex items-center justify-center gap-2 shadow-lg"
+              >
+                <Shuffle className="w-6 h-6"/> 确认并开始匹配
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
