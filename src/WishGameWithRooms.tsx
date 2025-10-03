@@ -82,7 +82,8 @@ export default function WishGameWithRooms(){
   // 复制提示
   const [copySuccess, setCopySuccess] = useState(false);
   const handleCopyRoom = (roomId: string, passcode: string) => {
-    const text = `${roomId}`;
+    const text = `Room ID: ${roomId}
+Passcode: ${passcode}`;
     
     // 方法1: 现代 Clipboard API
     if (navigator.clipboard && window.isSecureContext) {
@@ -214,7 +215,7 @@ export default function WishGameWithRooms(){
                 <button onClick={()=>handleCopyRoom(room.id, room.passcode)} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1">
                   <Copy className="w-4 h-4"/> {copySuccess ? '已复制!' : '分享'}
                 </button>
-                <button onClick={()=>setState({mode:'MENU'})} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
+                <button onClick={leaveRoom} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
                   <Home className="w-4 h-4"/> 离开
                 </button>
               </div>
@@ -294,7 +295,7 @@ export default function WishGameWithRooms(){
               <Copy className="w-5 h-5"/> {copySuccess ? '已复制!' : '分享房间'}
             </button>
             <button 
-              onClick={()=>setState({mode:'MENU'})} 
+              onClick={leaveRoom} 
               className="flex-1 px-4 py-3 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center justify-center gap-2 font-medium"
             >
               <Home className="w-5 h-5"/> 离开房间
