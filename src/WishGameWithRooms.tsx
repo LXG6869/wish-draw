@@ -254,11 +254,11 @@ export default function WishGameWithRooms(){
             </div>
 
             {isOwner && !isViewer && room.players.length>=2 && room.stage==='WAITING' && (
-              <div className="mt-6 pt-6 border-t"><button onClick={startGame} className="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-green-600 hover:to-blue-600 flex items-center justify-center gap-2"><Check className="w-4 h-4"/> 开始游戏</button></div>
+              <div className="mt-6 pt-6 border-t hidden md:block"><button onClick={startGame} className="w-full bg-gradient-to-r from-green-500 to-blue-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-green-600 hover:to-blue-600 flex items-center justify-center gap-2"><Check className="w-4 h-4"/> 开始游戏</button></div>
             )}
 
             {room.stage==='LOCK_CONFIRM' && (
-              <div className="mt-6 pt-6 border-t">{isOwner && !isViewer ? (
+              <div className="mt-6 pt-6 border-t hidden md:block">{isOwner && !isViewer ? (
                 <div className="space-y-3 text-center"><div className="text-gray-700">所有玩家已锁定,是否现在进行匹配?</div><button onClick={confirmAndMatch} className="w-full bg-gradient-to-r from-purple-500 to-pink-500 text-white py-3 px-6 rounded-xl font-semibold hover:from-purple-600 hover:to-pink-600 flex items-center justify-center gap-2"><Shuffle className="w-4 h-4"/> 确认并开始匹配</button></div>
               ) : (<div className="text-center text-gray-700">房主已准备匹配,请稍候…</div>)}</div>
             )}
