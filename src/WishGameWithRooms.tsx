@@ -81,9 +81,8 @@ export default function WishGameWithRooms(){
 
   // 复制提示
   const [copySuccess, setCopySuccess] = useState(false);
-  const handleCopyRoom = (roomId: string, passcode: string) => {
-    const text = `Room ID: ${roomId}
-Passcode: ${passcode}`;
+  const handleCopyRoom = (roomId: string) => {
+    const text = roomId;
     
     // 方法1: 现代 Clipboard API
     if (navigator.clipboard && window.isSecureContext) {
@@ -212,7 +211,7 @@ Passcode: ${passcode}`;
             <div className="flex items-center justify-between mb-6">
               <div><h2 className="text-2xl font-bold text-gray-800">房间:{room.id}</h2><p className="text-gray-600">密码:{room.passcode} | {room.players.length}/{room.maxPlayers} 人</p></div>
               <div className="flex items-center gap-2">
-                <button onClick={()=>handleCopyRoom(room.id, room.passcode)} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1">
+                <button onClick={()=>handleCopyRoom(room.id)} className="px-3 py-2 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1">
                   <Copy className="w-4 h-4"/> {copySuccess ? '已复制!' : '分享'}
                 </button>
                 <button onClick={leaveRoom} className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 flex items-center gap-1">
@@ -289,7 +288,7 @@ Passcode: ${passcode}`;
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg p-4 md:hidden z-10">
           <div className="max-w-2xl mx-auto flex justify-between items-center gap-3">
             <button 
-              onClick={()=>handleCopyRoom(room.id, room.passcode)} 
+              onClick={()=>handleCopyRoom(room.id)} 
               className="flex-1 px-4 py-3 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 flex items-center justify-center gap-2 font-medium"
             >
               <Copy className="w-5 h-5"/> {copySuccess ? '已复制!' : '分享房间'}
